@@ -2551,6 +2551,17 @@ input#id_number[readonly]:focus {
   overflow: hidden;
 }
 
+/* Gallery name size classes (applied by getFullNameSizeClass in gallery.js) */
+.id-fullname.id-fullname-md {
+  font-size: 2.0rem;  /* Medium names (19-25 chars) */
+}
+.id-fullname.id-fullname-sm {
+  font-size: 1.6rem;  /* Long names (26-35 chars) */
+}
+.id-fullname.id-fullname-xs {
+  font-size: 1.2rem;  /* Very long names (36+ chars) */
+}
+
 /* Dynamic font sizing is now handled by fitNameToLines() in app.js */
 
 .id-position-dept {
