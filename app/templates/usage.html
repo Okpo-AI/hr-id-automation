@@ -144,6 +144,17 @@
             <span class="status-label">Rate Limited</span>
           </div>
         </div>
+        <div class="status-card" style="border-left: 4px solid #7b1fa2;">
+          <div class="status-icon" style="color: #7b1fa2;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div class="status-info">
+            <span class="status-value" id="totalCost">-</span>
+            <span class="status-label">Total Cost (PHP)</span>
+          </div>
+        </div>
       </section>
 
       <!-- Search -->
@@ -183,7 +194,9 @@
                 <th>Lark Name</th>
                 <th>Lark User ID</th>
                 <th>Generations Used</th>
+                <th>All-Time Total</th>
                 <th>Remaining</th>
+                <th>Cost</th>
                 <th>Usage</th>
                 <th>Last Used</th>
                 <th>Status</th>
@@ -247,7 +260,7 @@
             <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke="currentColor" stroke-width="2"/>
             <path d="M12 9v4M12 17h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
           </svg>
-          This will allow the user to generate more AI headshots.
+          This will reset the counter and allow the user to generate more AI headshots. Previous usage history will be preserved.
         </p>
       </div>
       <div class="modal-footer">
@@ -273,7 +286,7 @@
             <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke="currentColor" stroke-width="2"/>
             <path d="M12 9v4M12 17h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
           </svg>
-          This will clear all usage records and allow every user to generate AI headshots again.
+          This will reset all usage counters and allow every user to generate AI headshots again. Previous usage history will be preserved.
         </p>
       </div>
       <div class="modal-footer">
@@ -283,6 +296,6 @@
     </div>
   </div>
 
-  <script src="/static/usage.js?v=2"></script>
+  <script src="/static/usage.js?v=3"></script>
 </body>
 </html>

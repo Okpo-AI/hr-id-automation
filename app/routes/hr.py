@@ -1937,7 +1937,9 @@ def get_usage_summary(request: Request, hr_session: str = Cookie(None)):
             "data": usage_data,
             "limit": HEADSHOT_LIMIT_PER_USER,
             "total_users": len(usage_data),
-            "total_generations": sum(u["usage_count"] for u in usage_data),
+            "total_generations": sum(u.get("total_generations", u["usage_count"]) for u in usage_data),
+            "active_generations": sum(u["usage_count"] for u in usage_data),
+            "price_per_generation": 2.40,
         })
     except Exception as e:
         logger.error(f"Error fetching usage summary: {e}")
@@ -1977,10 +1979,10 @@ def reset_all_rate_limits(request: Request, hr_session: str = Cookie(None)):
     try:
         count = reset_all_headshot_usage()
         if count >= 0:
-            logger.info(f"HR user '{session.get('username')}' reset ALL rate limits ({count} records deleted)")
+            logger.info(f"HR user '{session.get('username')}' reset ALL rate limits ({count} records reset)")
             return JSONResponse({
                 "success": True,
-                "message": f"All rate limits reset. {count} usage records cleared.",
+                "message": f"All rate limits reset. {count} usage records marked as reset.",
                 "deleted_count": count,
             })
         else:

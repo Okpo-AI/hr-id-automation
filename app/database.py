@@ -682,12 +682,18 @@ def _init_headshot_usage_sqlite():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         lark_user_id TEXT NOT NULL,
         lark_name TEXT DEFAULT '',
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        is_reset INTEGER NOT NULL DEFAULT 0
     )
     """)
     # Add lark_name column if table already exists without it
     try:
         cursor.execute("ALTER TABLE headshot_usage ADD COLUMN lark_name TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    # Add is_reset column if table already exists without it
+    try:
+        cursor.execute("ALTER TABLE headshot_usage ADD COLUMN is_reset INTEGER NOT NULL DEFAULT 0")
     except sqlite3.OperationalError:
         pass  # Column already exists
     cursor.execute("""
@@ -699,7 +705,7 @@ def _init_headshot_usage_sqlite():
 
 
 def get_headshot_usage_count(lark_user_id: str) -> int:
-    """Get the number of AI headshot generations for a Lark user."""
+    """Get the number of active (non-reset) AI headshot generations for a Lark user."""
     if not lark_user_id:
         return 0
 
@@ -709,6 +715,7 @@ def get_headshot_usage_count(lark_user_id: str) -> int:
                 supabase_client.table("headshot_usage")
                 .select("id", count="exact")
                 .eq("lark_user_id", lark_user_id)
+                .eq("is_reset", False)
                 .execute()
             )
             return result.count if result.count is not None else 0
@@ -722,7 +729,7 @@ def get_headshot_usage_count(lark_user_id: str) -> int:
             conn = get_sqlite_connection()
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT COUNT(*) FROM headshot_usage WHERE lark_user_id = ?",
+                "SELECT COUNT(*) FROM headshot_usage WHERE lark_user_id = ? AND is_reset = 0",
                 (lark_user_id,),
             )
             count = cursor.fetchone()[0]
@@ -783,22 +790,24 @@ def check_headshot_limit(lark_user_id: str) -> dict:
 def get_all_headshot_usage() -> list:
     """
     Get aggregated headshot usage for all Lark users.
-    Returns list of dicts: {lark_user_id, lark_name, usage_count, last_used, limit, remaining}.
+    Returns list of dicts with current cycle (non-reset) and total historical counts.
     """
     if USE_SUPABASE:
         try:
             result = (
                 supabase_client.table("headshot_usage")
-                .select("lark_user_id, lark_name, created_at")
+                .select("lark_user_id, lark_name, created_at, is_reset")
                 .order("created_at", desc=True)
                 .execute()
             )
             # Aggregate in Python
             from collections import defaultdict
-            usage_map = defaultdict(lambda: {"count": 0, "last_used": None, "lark_name": ""})
+            usage_map = defaultdict(lambda: {"active_count": 0, "total_count": 0, "last_used": None, "lark_name": ""})
             for row in (result.data or []):
                 uid = row["lark_user_id"]
-                usage_map[uid]["count"] += 1
+                usage_map[uid]["total_count"] += 1
+                if not row.get("is_reset", False):
+                    usage_map[uid]["active_count"] += 1
                 ts = row["created_at"]
                 if usage_map[uid]["last_used"] is None or ts > usage_map[uid]["last_used"]:
                     usage_map[uid]["last_used"] = ts
@@ -811,10 +820,11 @@ def get_all_headshot_usage() -> list:
                 {
                     "lark_user_id": uid,
                     "lark_name": info["lark_name"],
-                    "usage_count": info["count"],
+                    "usage_count": info["active_count"],
+                    "total_generations": info["total_count"],
                     "last_used": info["last_used"],
                     "limit": HEADSHOT_LIMIT_PER_USER,
-                    "remaining": max(0, HEADSHOT_LIMIT_PER_USER - info["count"]),
+                    "remaining": max(0, HEADSHOT_LIMIT_PER_USER - info["active_count"]),
                 }
                 for uid, info in usage_map.items()
             ]
@@ -828,7 +838,10 @@ def get_all_headshot_usage() -> list:
             conn = get_sqlite_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT lark_user_id, COUNT(*) as usage_count, MAX(created_at) as last_used,
+                SELECT lark_user_id,
+                       SUM(CASE WHEN is_reset = 0 THEN 1 ELSE 0 END) as active_count,
+                       COUNT(*) as total_count,
+                       MAX(created_at) as last_used,
                        MAX(lark_name) as lark_name
                 FROM headshot_usage
                 GROUP BY lark_user_id
@@ -839,9 +852,10 @@ def get_all_headshot_usage() -> list:
             return [
                 {
                     "lark_user_id": row[0],
-                    "lark_name": row[3] or "",
+                    "lark_name": row[4] or "",
                     "usage_count": row[1],
-                    "last_used": row[2],
+                    "total_generations": row[2],
+                    "last_used": row[3],
                     "limit": HEADSHOT_LIMIT_PER_USER,
                     "remaining": max(0, HEADSHOT_LIMIT_PER_USER - row[1]),
                 }
@@ -853,16 +867,16 @@ def get_all_headshot_usage() -> list:
 
 
 def reset_headshot_usage(lark_user_id: str) -> bool:
-    """Delete all headshot usage records for a Lark user, resetting their rate limit."""
+    """Mark all active headshot usage records as reset for a Lark user (preserves history)."""
     if not lark_user_id:
         return False
 
     if USE_SUPABASE:
         try:
-            supabase_client.table("headshot_usage").delete().eq(
-                "lark_user_id", lark_user_id
-            ).execute()
-            logger.info(f"Reset headshot usage for lark_user_id={lark_user_id}")
+            supabase_client.table("headshot_usage").update(
+                {"is_reset": True}
+            ).eq("lark_user_id", lark_user_id).eq("is_reset", False).execute()
+            logger.info(f"Reset headshot usage for lark_user_id={lark_user_id} (history preserved)")
             return True
         except Exception as e:
             logger.error(f"Supabase reset_headshot_usage error: {e}")
@@ -874,12 +888,12 @@ def reset_headshot_usage(lark_user_id: str) -> bool:
             conn = get_sqlite_connection()
             cursor = conn.cursor()
             cursor.execute(
-                "DELETE FROM headshot_usage WHERE lark_user_id = ?",
+                "UPDATE headshot_usage SET is_reset = 1 WHERE lark_user_id = ? AND is_reset = 0",
                 (lark_user_id,),
             )
             conn.commit()
             conn.close()
-            logger.info(f"Reset headshot usage for lark_user_id={lark_user_id} (SQLite)")
+            logger.info(f"Reset headshot usage for lark_user_id={lark_user_id} (SQLite, history preserved)")
             return True
         except Exception as e:
             logger.error(f"SQLite reset_headshot_usage error: {e}")
@@ -887,18 +901,23 @@ def reset_headshot_usage(lark_user_id: str) -> bool:
 
 
 def reset_all_headshot_usage() -> int:
-    """Delete ALL headshot usage records, resetting rate limits for everyone. Returns count deleted."""
+    """Mark ALL active headshot usage records as reset (preserves history). Returns count reset."""
     if USE_SUPABASE:
         try:
-            # Supabase requires a filter for delete; use neq on a non-existent value to match all
-            result = (
+            # Count active records first
+            count_result = (
                 supabase_client.table("headshot_usage")
-                .delete()
-                .neq("lark_user_id", "___IMPOSSIBLE_VALUE___")
+                .select("id", count="exact")
+                .eq("is_reset", False)
                 .execute()
             )
-            count = len(result.data) if result.data else 0
-            logger.info(f"Reset ALL headshot usage: {count} records deleted (Supabase)")
+            count = count_result.count if count_result.count is not None else 0
+            # Mark all active records as reset
+            if count > 0:
+                supabase_client.table("headshot_usage").update(
+                    {"is_reset": True}
+                ).eq("is_reset", False).execute()
+            logger.info(f"Reset ALL headshot usage: {count} records marked as reset (Supabase)")
             return count
         except Exception as e:
             logger.error(f"Supabase reset_all_headshot_usage error: {e}")
@@ -909,12 +928,12 @@ def reset_all_headshot_usage() -> int:
             _init_headshot_usage_sqlite()
             conn = get_sqlite_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM headshot_usage")
+            cursor.execute("SELECT COUNT(*) FROM headshot_usage WHERE is_reset = 0")
             count = cursor.fetchone()[0]
-            cursor.execute("DELETE FROM headshot_usage")
+            cursor.execute("UPDATE headshot_usage SET is_reset = 1 WHERE is_reset = 0")
             conn.commit()
             conn.close()
-            logger.info(f"Reset ALL headshot usage: {count} records deleted (SQLite)")
+            logger.info(f"Reset ALL headshot usage: {count} records marked as reset (SQLite)")
             return count
         except Exception as e:
             logger.error(f"SQLite reset_all_headshot_usage error: {e}")

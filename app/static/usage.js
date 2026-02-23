@@ -9,6 +9,7 @@
 let allUsageData = [];
 let filteredUsageData = [];
 let pendingResetUserId = null;
+const PRICE_PER_GENERATION = 2.40;
 
 // ============================================
 // DOM Elements
@@ -19,6 +20,7 @@ const DOM = {
   totalGenerations: document.getElementById('totalGenerations'),
   usageLimit: document.getElementById('usageLimit'),
   rateLimitedCount: document.getElementById('rateLimitedCount'),
+  totalCost: document.getElementById('totalCost'),
   // Table
   tableSection: document.getElementById('tableSection'),
   loadingState: document.getElementById('loadingState'),
@@ -131,6 +133,9 @@ async function fetchUsageData() {
     DOM.usageLimit.textContent = json.limit || 5;
     const rateLimited = allUsageData.filter(u => u.remaining <= 0).length;
     animateCounter(DOM.rateLimitedCount, rateLimited);
+    // Total cost based on all-time generations
+    const totalGens = json.total_generations || 0;
+    DOM.totalCost.textContent = '₱' + (totalGens * PRICE_PER_GENERATION).toFixed(2);
     // Render table
     applyFilters();
   } catch (err) {
@@ -179,6 +184,8 @@ function renderTable() {
     const isLimited = u.remaining <= 0;
     const statusClass = isLimited ? 'status-rate-limited' : (u.usage_count > 0 ? 'status-active' : 'status-unused');
     const statusText = isLimited ? 'Rate Limited' : (u.usage_count > 0 ? 'Active' : 'No Usage');
+    const totalGens = u.total_generations || u.usage_count;
+    const userCost = (totalGens * PRICE_PER_GENERATION).toFixed(2);
 
     // Format date
     let lastUsedStr = '-';
@@ -203,7 +210,9 @@ function renderTable() {
         <span class="usage-user-id" title="${u.lark_user_id}">${displayId}</span>
       </td>
       <td><strong>${u.usage_count}</strong> / ${u.limit}</td>
+      <td>${totalGens}</td>
       <td>${u.remaining}</td>
+      <td>₱${userCost}</td>
       <td>
         <div class="usage-bar-track">
           <div class="usage-bar-fill ${isLimited ? 'usage-bar-limited' : ''}" style="width: ${Math.min(usagePct, 100)}%"></div>
@@ -305,8 +314,8 @@ async function confirmResetAll() {
     const json = await res.json();
     if (!json.success) throw new Error(json.error || 'Reset failed');
 
-    updateProgress('All rate limits reset!', `${json.deleted_count} records cleared`, 100);
-    showToast(`All rate limits reset — ${json.deleted_count} records cleared`, 'success');
+    updateProgress('All rate limits reset!', `${json.deleted_count} records reset`, 100);
+    showToast(`All rate limits reset — ${json.deleted_count} records reset (history preserved)`, 'success');
     await fetchUsageData();
   } catch (err) {
     console.error('Reset all error:', err);

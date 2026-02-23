@@ -124,6 +124,9 @@ CREATE INDEX IF NOT EXISTS idx_headshot_usage_lark_user ON headshot_usage(lark_u
 -- Add lark_name column if table already exists
 ALTER TABLE headshot_usage ADD COLUMN IF NOT EXISTS lark_name TEXT DEFAULT '';
 
+-- Add is_reset column to preserve usage history on reset (false = active, true = previously reset)
+ALTER TABLE headshot_usage ADD COLUMN IF NOT EXISTS is_reset BOOLEAN DEFAULT FALSE;
+
 -- Card image URLs for direct PNG bot delivery (skips PDF→PNG conversion)
 -- Stores JSON array of {label, url} objects for each card face
 -- Example: [{"label": "SPMC ID - Front", "url": "https://..."}, ...]
