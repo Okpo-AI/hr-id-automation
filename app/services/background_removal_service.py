@@ -1,148 +1,88 @@
 """
-Background Removal Service
-Handles removing backgrounds from images using remove.bg API.
-
-This service is used to remove the background from AI-generated headshots
-so they can be placed on ID card templates with custom backgrounds.
-
-For Vercel deployment, we use the remove.bg API instead of local rembg
-to avoid large dependencies and serverless function size limits.
-
-Authentication: Uses REMOVEBG_API_KEY environment variable.
-Get your API key at: https://www.remove.bg/api
-
-FIX: Improved error handling and request formatting for reliable 
-background removal in both local and Vercel environments.
+Background Removal Service (Local)
+Uses open-source rembg with model: u2net_human_seg.
+Supports /uploads/... local paths, data URLs, and http(s) URLs.
 """
-import os
-import io
+import base64
 import logging
+from pathlib import Path
 from typing import Optional, Tuple
 import urllib.request
-import urllib.error
-import urllib.parse
-import json
-import base64
 
-# Configure logging
+try:
+    from rembg import remove, new_session
+    REMBG_AVAILABLE = True
+except ModuleNotFoundError:
+    remove = None
+    new_session = None
+    REMBG_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
+_REMBG_SESSION = None
+_UPLOADS_ROOT = Path(__file__).resolve().parent.parent / "static" / "uploads"
 
-# Remove.bg API endpoint
-REMOVEBG_API_URL = "https://api.remove.bg/v1.0/removebg"
+
+def _get_rembg_session():
+    global _REMBG_SESSION
+    if not REMBG_AVAILABLE:
+        raise RuntimeError("rembg is not installed")
+    if _REMBG_SESSION is None:
+        _REMBG_SESSION = new_session("u2net_human_seg")
+        logger.info("Initialized rembg session with model: u2net_human_seg")
+    return _REMBG_SESSION
+
+
+def _load_input_image_bytes(image_url: str) -> Tuple[Optional[bytes], Optional[str]]:
+    if not image_url:
+        return None, "No image URL provided"
+
+    if image_url.startswith("/uploads/"):
+        rel = image_url.replace("/uploads/", "", 1)
+        local_path = _UPLOADS_ROOT / rel
+        if not local_path.exists():
+            return None, f"Local upload not found: {local_path}"
+        try:
+            return local_path.read_bytes(), None
+        except Exception as e:
+            return None, f"Failed to read local upload: {e}"
+
+    if image_url.startswith("data:"):
+        try:
+            _, encoded = image_url.split(",", 1)
+            return base64.b64decode(encoded), None
+        except Exception as e:
+            return None, f"Invalid data URL: {e}"
+
+    if image_url.startswith("http://") or image_url.startswith("https://"):
+        try:
+            req = urllib.request.Request(
+                image_url,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; HR-ID-Automation/1.0)"},
+            )
+            with urllib.request.urlopen(req, timeout=30) as response:
+                return response.read(), None
+        except Exception as e:
+            return None, f"Failed to download remote image: {e}"
+
+    return None, "Invalid image URL. Expected /uploads/... or data URL or http(s) URL."
 
 
 def remove_background_from_url(image_url: str) -> Tuple[Optional[bytes], Optional[str]]:
-    """
-    Download an image from URL and remove its background using remove.bg API.
-    
-    FIX: Uses direct form data encoding with proper headers to ensure
-    the API accepts the request in both local and Vercel environments.
-    
-    Args:
-        image_url: Public URL of the image to process
-    
-    Returns:
-        Tuple of (image_bytes_with_transparent_bg, None) on success,
-        or (None, error_message) on failure
-    """
-    if not image_url:
-        logger.error("remove_background_from_url: No image URL provided")
-        return None, "No image URL provided"
-    
-    api_key = os.environ.get('REMOVEBG_API_KEY')
-    
-    if not api_key:
-        logger.warning("REMOVEBG_API_KEY not set - background removal disabled")
-        return None, "Background removal API not configured"
-    
-    logger.info(f"=== REMOVE.BG API REQUEST ===")
-    logger.info(f"Image URL: {image_url[:100]}...")
-    logger.info(f"API Key present: {bool(api_key)} (length: {len(api_key)})")
-    
+    if not REMBG_AVAILABLE:
+        return None, "Background removal failed: rembg dependency not installed"
+
     try:
-        # FIX: Use multipart form data which is more reliable than URL-encoded data
-        # This format works consistently in both local and serverless environments
-        boundary = '----PythonFormBoundary7MA4YWxkTrZu0gW'
-        
-        body_parts = [
-            f'--{boundary}',
-            'Content-Disposition: form-data; name="image_url"',
-            '',
-            image_url,
-            f'--{boundary}',
-            'Content-Disposition: form-data; name="size"',
-            '',
-            'auto',
-            f'--{boundary}',
-            'Content-Disposition: form-data; name="format"',
-            '',
-            'png',
-            f'--{boundary}',
-            'Content-Disposition: form-data; name="type"',
-            '',
-            'person',
-            f'--{boundary}--',
-            ''
-        ]
-        
-        body = '\r\n'.join(body_parts).encode('utf-8')
-        
-        req = urllib.request.Request(
-            REMOVEBG_API_URL,
-            data=body,
-            headers={
-                'X-Api-Key': api_key,
-                'Content-Type': f'multipart/form-data; boundary={boundary}'
-            },
-            method='POST'
-        )
-        
-        logger.info("Sending request to remove.bg API...")
-        
-        with urllib.request.urlopen(req, timeout=120) as response:
-            output_bytes = response.read()
-            content_type = response.headers.get('Content-Type', '')
-            
-            logger.info(f"Response status: {response.status}")
-            logger.info(f"Response Content-Type: {content_type}")
-            logger.info(f"Response size: {len(output_bytes)} bytes")
-        
-        # Verify we got an image back (not JSON error)
-        if content_type.startswith('application/json') or len(output_bytes) < 1000:
-            try:
-                error_data = json.loads(output_bytes.decode('utf-8'))
-                error_msg = error_data.get('errors', [{}])[0].get('title', 'Unknown error')
-                logger.error(f"remove.bg returned error: {error_msg}")
-                return None, f"Background removal failed: {error_msg}"
-            except:
-                pass
-        
-        logger.info(f"=== BACKGROUND REMOVAL SUCCESS ===")
-        logger.info(f"Output size: {len(output_bytes)} bytes")
+        input_bytes, load_err = _load_input_image_bytes(image_url)
+        if not input_bytes:
+            return None, f"Background removal failed: {load_err}"
+
+        session = _get_rembg_session()
+        output_bytes = remove(input_bytes, session=session)
+
+        if not output_bytes or len(output_bytes) < 100:
+            return None, "Background removal failed: empty output"
+
         return output_bytes, None
-        
-    except urllib.error.HTTPError as e:
-        error_body = ""
-        try:
-            error_body = e.read().decode('utf-8')
-        except:
-            error_body = str(e)
-        
-        logger.error(f"remove.bg API HTTP error {e.code}: {error_body[:500]}")
-        
-        # Parse error message if JSON
-        try:
-            error_json = json.loads(error_body)
-            error_msg = error_json.get('errors', [{}])[0].get('title', error_body[:100])
-        except:
-            error_msg = f"HTTP {e.code}: {error_body[:100]}"
-        
-        return None, f"Background removal failed: {error_msg}"
-    except urllib.error.URLError as e:
-        logger.error(f"remove.bg API URL error: {str(e)}")
-        return None, f"Connection error: {str(e)}"
     except Exception as e:
-        logger.error(f"Error removing background: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
-        return None, str(e)
+        logger.error(f"Error removing background with rembg: {e}")
+        return None, f"Background removal failed: {e}"

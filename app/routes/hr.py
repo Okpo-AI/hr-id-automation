@@ -1114,18 +1114,29 @@ def api_remove_background(employee_id: int, hr_session: str = Cookie(None)):
         txn = TransactionManager("background_removal", context={"employee_id": employee_id})
         
         try:
-            # Step 1: Remove background using remove.bg API
+            # Step 1: Remove background using local rembg (non-blocking fallback)
             def _remove_bg():
                 nobg_result, err = remove_background_from_url(ai_photo_url)
                 if not nobg_result:
-                    raise Exception(err or "Failed to remove background")
+                    logger.warning("Background removal unavailable, using original image. reason=%s", err or "unknown")
+                    return None
                 return nobg_result
             
             nobg_bytes = txn.execute_step(
                 name="remove_background_api",
                 action=_remove_bg,
+                is_critical=False,
                 error_message="Failed to remove background from image",
             )
+
+            if nobg_bytes is None:
+                summary = txn.commit()
+                return JSONResponse(content={
+                    "success": True,
+                    "nobg_photo_url": ai_photo_url,
+                    "message": "Background removal skipped. Using original image.",
+                    "transaction": summary,
+                })
             
             logger.info(f"Background removed successfully, got {len(nobg_bytes)} bytes")
             
