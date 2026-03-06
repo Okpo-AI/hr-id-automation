@@ -8,6 +8,8 @@ import logging
 from pathlib import Path
 from typing import Optional, Tuple
 import urllib.request
+import io
+from PIL import Image
 
 try:
     from rembg import remove, new_session
@@ -68,13 +70,41 @@ def _load_input_image_bytes(image_url: str) -> Tuple[Optional[bytes], Optional[s
 
 
 def remove_background_from_url(image_url: str) -> Tuple[Optional[bytes], Optional[str]]:
-    if not REMBG_AVAILABLE:
-        return None, "Background removal failed: rembg dependency not installed"
-
     try:
         input_bytes, load_err = _load_input_image_bytes(image_url)
         if not input_bytes:
             return None, f"Background removal failed: {load_err}"
+
+        # Fallback: if rembg is unavailable, apply simple chroma key removal
+        # for green-screen images so backgrounds can still be removed.
+        if not REMBG_AVAILABLE:
+            try:
+                img = Image.open(io.BytesIO(input_bytes)).convert("RGBA")
+                pixels = img.load()
+                width, height = img.size
+                keyed = 0
+
+                for y in range(height):
+                    for x in range(width):
+                        r, g, b, a = pixels[x, y]
+                        green_dominance = g - max(r, b)
+                        is_green = g > 95 and green_dominance > 25
+                        if is_green:
+                            softness = min(1.0, max(0.0, (green_dominance - 25) / 90.0))
+                            new_a = int((1.0 - softness) * a)
+                            pixels[x, y] = (r, g, b, new_a)
+                            keyed += 1
+
+                ratio = keyed / max(1, width * height)
+                # Avoid nuking non-green images by mistake.
+                if ratio < 0.01:
+                    return None, "Background removal failed: rembg missing and image is not green-screen"
+
+                out = io.BytesIO()
+                img.save(out, format="PNG")
+                return out.getvalue(), None
+            except Exception as e:
+                return None, f"Background removal failed: rembg missing and chroma key failed ({e})"
 
         session = _get_rembg_session()
         output_bytes = remove(input_bytes, session=session)

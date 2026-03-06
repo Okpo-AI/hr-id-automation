@@ -562,7 +562,7 @@ async function removeBackground(id) {
   }
 
   try {
-    const response = await fetch(`/hr/api/employees/${id}/remove-background`, {
+    const response = await fetch(`/hr/api/employees/${id}/remove-background?force=true`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include'
@@ -695,16 +695,12 @@ function viewDetails(id) {
     <button class="btn btn-secondary" onclick="closeModal()">Close</button>
   `;
   
-  if (emp.status === 'Reviewing') {
+  if (['Reviewing', 'Pending', 'Submitted', 'Rendered', 'Approved', 'Sent to POC', 'Completed'].includes(emp.status)) {
     footerHtml = `
       <button class="btn btn-danger" onclick="removeEmployee(${emp.id}); closeModal();">Remove</button>
       <button class="btn btn-secondary" onclick="closeModal()">Close</button>
       <button class="btn btn-primary" onclick="renderAndApprove(${emp.id}); closeModal();">Render ID</button>
-    `;
-  } else if (emp.status === 'Approved' || emp.status === 'Sent to POC') {
-    footerHtml = `
-      <button class="btn btn-danger" onclick="removeEmployee(${emp.id}); closeModal();">Remove</button>
-      <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+      <button class="btn btn-primary" onclick="rerenderID(${emp.id}); closeModal();">Re-render ID</button>
       <button class="btn btn-primary" onclick="previewID(${emp.id})">Preview ID</button>
     `;
   }
@@ -760,6 +756,14 @@ async function renderAndApprove(id) {
     console.error('Error rendering employee ID:', error);
     showToast('Failed to render: ' + error.message, 'error');
   }
+}
+
+async function rerenderID(id) {
+  const emp = dashboardState.employees.find(e => e.id === id);
+  if (!emp) return;
+
+  if (!confirm('Are you sure you want to re-render this ID?')) return;
+  await renderAndApprove(id);
 }
 
 /**
