@@ -1,0 +1,6 @@
+# Optional heavy dependencies (NOT for serverless/Lambda)
+# Install only when running on a VM/container with enough disk/RAM:
+#   pip install -r requirements.txt -r requirements-optional-ml.txt
+
+supabase==2.10.0
+rembg==2.0.59
