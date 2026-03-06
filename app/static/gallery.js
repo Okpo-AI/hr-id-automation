@@ -813,6 +813,32 @@ function getFullNameSizeClass(emp) {
   return '';  // Default 2.4rem for short names
 }
 
+// Ensure render pipeline uses a no-background image.
+// Tries cached nobg first, then forces backend background removal.
+async function ensureNoBackgroundPhoto(emp) {
+  if (emp.nobg_photo_url) return true;
+  if (!emp.new_photo_url) return false;
+
+  try {
+    const resp = await fetch(`/hr/api/employees/${emp.id}/remove-background?force=true`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include'
+    });
+    const data = await resp.json();
+
+    if (resp.ok && data.success && data.nobg_photo_url && data.nobg_photo_url !== emp.new_photo_url) {
+      emp.nobg_photo_url = data.nobg_photo_url;
+      return true;
+    }
+
+    return false;
+  } catch (e) {
+    console.error('ensureNoBackgroundPhoto failed:', e);
+    return false;
+  }
+}
+
 // Generate Regular ID Card HTML (for Freelancer, Intern, Others)
 // Image source rule: Uses AI-generated photo (nobg_photo_url preferred)
 // For Repossessor Portrait Template: Uses AI photo
@@ -927,15 +953,12 @@ function generateRegularIDCardHtml(emp) {
 }
 
 // Generate Field Office ID Card HTML (for Field Officers)
-// Image source rule: Uses ORIGINAL uploaded photo (NOT AI-generated)
-// - Field Officer (Others): Uses original photo only
-// - Field Officer (Repossessor) Landscape Template: Uses original photo
+// Image source rule: Prefer no-background image for rendering consistency.
 function generateFieldOfficeIDCardHtml(emp) {
-  // Use original uploaded photo only (NOT AI photo)
-  const idPhotoUrl = emp.photo_url;
+  const idPhotoUrl = emp.nobg_photo_url || emp.chroma_photo_url || emp.new_photo_url || emp.photo_url;
   const photoHasImage = idPhotoUrl ? 'has-image' : '';
   const photoHtml = idPhotoUrl 
-    ? `<img src="${idPhotoUrl}" alt="${escapeHtml(emp.employee_name)}" crossorigin="anonymous">`
+    ? `<img src="${idPhotoUrl}" alt="${escapeHtml(emp.employee_name)}" crossorigin="anonymous" style="background:#ffffff;">`
     : `<span class="id-fo-photo-placeholder">Photo</span>`;
 
   // Apply Cloudinary e_trim transformation to signature for dynamic sizing
@@ -962,7 +985,7 @@ function generateFieldOfficeIDCardHtml(emp) {
       <div class="id-field-office-content">
         <!-- Photo Section with border -->
         <div class="id-fo-photo-section">
-          <div class="id-fo-photo-container ${photoHasImage}">
+          <div class="id-fo-photo-container ${photoHasImage}" style="background:#ffffff;">
             ${photoHtml}
           </div>
         </div>
@@ -1480,6 +1503,11 @@ function closePreviewModal() {
 const PNG_CAPTURE_SCALE = 4; // 4x scale for high-res PNG (512×4 = 2048px width)
 
 async function captureAndUploadCardImages(emp) {
+  const hasNoBg = await ensureNoBackgroundPhoto(emp);
+  if (!hasNoBg) {
+    throw new Error('Cannot render card images: no-background photo is required.');
+  }
+
   const isFieldOfficer = emp.position === 'Field Officer';
   const foType = emp.field_officer_type || '';
   const isRepoShared = isFieldOfficer && ['Repossessor', 'Reprocessor', 'Shared'].includes(foType);
@@ -1739,6 +1767,12 @@ async function captureCardCanvas(tempContainer, cardHtml, designWidth, designHei
 // PDF Dimensions: 2.13" × 3.33" (97% of 3.43" original) at 300 DPI
 // For ALL Field Officers: generates 4-page PDF (Portrait SPMC + Landscape Field Office templates)
 async function downloadIDPdf(emp) {
+  const hasNoBg = await ensureNoBackgroundPhoto(emp);
+  if (!hasNoBg) {
+    showToast('Background removal is required before rendering ID. Please remove background first.', 'error');
+    return;
+  }
+
   const isFieldOfficer = emp.position === 'Field Officer';
   const pageCount = isFieldOfficer ? 4 : 2;
   
@@ -2623,6 +2657,11 @@ const OKPO_LOGO_URL = 'https://239dc453931a663c0cfa3bb867f1aaae.cdn.bubble.io/cd
  * @returns {Promise<Blob>} - PDF blob or throws error
  */
 async function generatePDFForEmployee(emp) {
+  const hasNoBg = await ensureNoBackgroundPhoto(emp);
+  if (!hasNoBg) {
+    throw new Error('No-background photo is required before PDF generation.');
+  }
+
   const isFieldOfficer = emp.position === 'Field Officer';
   
   // Create temp container

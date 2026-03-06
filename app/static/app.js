@@ -573,15 +573,20 @@ function initInputValidation() {
   }
 
   // ========================================
-  // ID Number - Readonly (locked from editing)
+  // ID Number - Editable with format guard
   // ========================================
   const idNumberField = document.getElementById('id_number');
   if (idNumberField) {
-    // ID Number is readonly - no input/paste events needed
-    // Just validate value exists on blur
-    idNumberField.addEventListener('focus', function(e) {
-      // Prevent focus styling since it's readonly
-      this.blur();
+    idNumberField.addEventListener('input', function() {
+      this.value = this.value.replace(/[^A-Za-z0-9-]/g, '').toUpperCase();
+    });
+
+    idNumberField.addEventListener('blur', function() {
+      if (!this.value.trim()) {
+        showFieldError('id_number', 'ID Number is required');
+      } else {
+        clearFieldError('id_number');
+      }
     });
   }
 
@@ -2658,13 +2663,52 @@ function initFormSubmission() {
       return;
     }
 
-    // Validate all required fields
+    // Validate all required and currently active/visible fields
     const requiredInputs = elements.form.querySelectorAll('[required]');
     let isValid = true;
+    const missingFields = [];
+    const handledRadioGroups = new Set();
+
+    const isActiveField = (el) => {
+      // Hidden inputs and disabled inputs are not user-fillable
+      if (!el || el.disabled || el.type === 'hidden') return false;
+      // Ignore controls inside hidden containers
+      const hiddenAncestor = el.closest('[style*="display: none"], [hidden], [aria-hidden="true"]');
+      if (hiddenAncestor) return false;
+      return true;
+    };
 
     requiredInputs.forEach(input => {
-      if (!input.value.trim()) {
+      if (!isActiveField(input)) return;
+
+      // Radio groups: validate group once
+      if (input.type === 'radio') {
+        const groupName = input.name;
+        if (!groupName || handledRadioGroups.has(groupName)) return;
+        handledRadioGroups.add(groupName);
+
+        const checked = elements.form.querySelector(`input[name="${groupName}"]:checked`);
+        if (!checked) {
+          isValid = false;
+          missingFields.push(groupName.replace(/_/g, ' '));
+        }
+        return;
+      }
+
+      // File input required check
+      if (input.type === 'file') {
+        if (!input.files || input.files.length === 0) {
+          isValid = false;
+          missingFields.push((input.name || input.id || 'file').replace(/_/g, ' '));
+          input.style.borderColor = 'var(--color-danger)';
+        }
+        return;
+      }
+
+      // Standard text/select check
+      if (!String(input.value || '').trim()) {
         isValid = false;
+        missingFields.push((input.name || input.id || 'field').replace(/_/g, ' '));
         input.style.borderColor = 'var(--color-danger)';
         input.addEventListener('input', function handler() {
           this.style.borderColor = '';
@@ -2710,7 +2754,9 @@ function initFormSubmission() {
     }
 
     if (!isValid) {
-      showMessage('Please fill in all required fields.', 'error');
+      const deduped = [...new Set(missingFields)];
+      const detail = deduped.length ? ` Missing: ${deduped.join(', ')}.` : '';
+      showMessage(`Please fill in all required fields.${detail}`, 'error');
       return;
     }
 

@@ -5,7 +5,7 @@ Includes background removal functionality for AI-generated photos.
 Supports both password-based and Lark SSO authentication.
 Uses TransactionManager for ACID compliance across multi-step API workflows.
 """
-from fastapi import APIRouter, Request, Cookie
+from fastapi import APIRouter, Request, Cookie, Query
 from fastapi.responses import HTMLResponse, JSONResponse, Response, RedirectResponse
 from fastapi.templating import Jinja2Templates
 import os
@@ -882,9 +882,9 @@ def api_render_employee(employee_id: int, hr_session: str = Cookie(None)):
                 content={"success": False, "error": "Employee not found"}
             )
 
-        # Accept Reviewing, Pending, or Submitted status for rendering
+        # Allow initial render and re-render for active lifecycle statuses
         current_status = row.get("status")
-        acceptable_statuses = ["Reviewing", "Pending", "Submitted"]
+        acceptable_statuses = ["Reviewing", "Pending", "Submitted", "Rendered", "Approved", "Sent to POC", "Completed"]
         
         if current_status not in acceptable_statuses:
             return JSONResponse(
@@ -1046,7 +1046,7 @@ def api_delete_employee(employee_id: int, hr_session: str = Cookie(None)):
 
 
 @router.post("/api/employees/{employee_id}/remove-background")
-def api_remove_background(employee_id: int, hr_session: str = Cookie(None)):
+def api_remove_background(employee_id: int, hr_session: str = Cookie(None), force: bool = Query(False)):
     """Remove background from AI-generated photo and save the result - Protected by org access"""
     import traceback
     
@@ -1076,8 +1076,8 @@ def api_remove_background(employee_id: int, hr_session: str = Cookie(None)):
                 content={"success": False, "error": "No AI photo available to process"}
             )
 
-        # If already has nobg photo, return it (cached result)
-        if row.get("nobg_photo_url"):
+        # If already has nobg photo, return it (cached result) unless force reprocess
+        if row.get("nobg_photo_url") and not force:
             logger.info(f"Employee {employee_id} already has nobg photo (reusing cached): {row.get('nobg_photo_url', '')[:50]}...")
             return JSONResponse(content={
                 "success": True, 
@@ -1089,9 +1089,9 @@ def api_remove_background(employee_id: int, hr_session: str = Cookie(None)):
         ai_photo_url = row.get("new_photo_url")
         safe_id = row.get("id_number", "").replace(' ', '_').replace('/', '-').replace('\\', '-')
         
-        # Check workflow cache for previously generated nobg result
+        # Check workflow cache for previously generated nobg result (unless force reprocess)
         nobg_cache_key = make_cache_key("nobg", safe_id)
-        cached_nobg = WorkflowCache.get(nobg_cache_key)
+        cached_nobg = None if force else WorkflowCache.get(nobg_cache_key)
         if cached_nobg:
             logger.info(f"Using cached nobg URL for employee {employee_id}: {cached_nobg[:50]}...")
             # Save to database since we have it cached
@@ -1114,7 +1114,7 @@ def api_remove_background(employee_id: int, hr_session: str = Cookie(None)):
         txn = TransactionManager("background_removal", context={"employee_id": employee_id})
         
         try:
-            # Step 1: Remove background using remove.bg API
+            # Step 1: Remove background (strict mode: fail if not removed)
             def _remove_bg():
                 nobg_result, err = remove_background_from_url(ai_photo_url)
                 if not nobg_result:

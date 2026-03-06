@@ -189,8 +189,15 @@ async def api_generate_headshot(request: GenerateHeadshotRequest, employee_sessi
                 name="generate_seedream_headshot",
                 action=_generate_seedream,
                 cache_key=seedream_cache_key,
+                is_critical=False,
                 error_message="Failed to generate headshot. Please try again.",
             )
+
+            # If Seedream fails (e.g., image parameter format rejected), fall back
+            # to the uploaded/local source image so the workflow still succeeds.
+            if not generated_url:
+                logger.warning("Seedream generation unavailable. Falling back to source image.")
+                generated_url = cloudinary_url
             
             # Increment headshot usage count after successful AI generation
             if lark_user_id:
@@ -247,7 +254,11 @@ async def api_generate_headshot(request: GenerateHeadshotRequest, employee_sessi
                     "success": True,
                     "generated_image": final_url,
                     "transparent": is_transparent,
-                    "message": "AI headshot generated" + (" with transparent background" if is_transparent else " (background removal unavailable)"),
+                    "message": (
+                        "AI headshot generated"
+                        if final_url != cloudinary_url
+                        else "AI generation unavailable. Using source image."
+                    ) + (" with transparent background" if is_transparent else " (background removal unavailable)"),
                     "used": new_limit_info["used"],
                     "limit": new_limit_info["limit"],
                     "remaining": new_limit_info["remaining"],

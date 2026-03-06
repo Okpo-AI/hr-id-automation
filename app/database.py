@@ -15,10 +15,13 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+# Supabase is opt-in. Default runtime is SQLite unless ENABLE_SUPABASE=true.
+ENABLE_SUPABASE = os.environ.get("ENABLE_SUPABASE", "false").lower() in ("1", "true", "yes", "on")
+
 # Check if Supabase credentials are available
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-USE_SUPABASE = bool(SUPABASE_URL and SUPABASE_KEY)
+USE_SUPABASE = ENABLE_SUPABASE and bool(SUPABASE_URL and SUPABASE_KEY)
 
 # Fallback to SQLite for local development
 IS_VERCEL = os.environ.get("VERCEL", "0") == "1" or os.environ.get("VERCEL_ENV") is not None

@@ -1,0 +1,13 @@
+services:
+  hr-id-automation:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hr-id-automation
+    ports:
+      - "8005:8005"
+    env_file:
+      - .env
+    environment:
+      - PORT=8005
+    restart: unless-stopped
