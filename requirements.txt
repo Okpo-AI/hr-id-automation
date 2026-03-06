@@ -7,9 +7,6 @@ aiofiles==23.2.1
 # Templates
 jinja2==3.1.2
 
-# Database
-supabase==2.10.0
-
 # Authentication
 bcrypt==4.1.2
 
@@ -18,7 +15,6 @@ requests==2.31.0
 
 # Image Processing
 Pillow==10.2.0
-rembg==2.0.59
 
 # Environment Variables
 python-dotenv==1.0.0

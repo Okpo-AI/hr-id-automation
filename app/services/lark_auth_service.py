@@ -46,10 +46,13 @@ IS_VERCEL = os.getenv("VERCEL", "0") == "1" or os.getenv("VERCEL_ENV") is not No
 # CRITICAL: Strip whitespace from env var to remove trailing newlines
 # (copy/paste in Vercel dashboard can introduce \n causing OAuth error 20029)
 _raw_redirect_uri = os.getenv('LARK_REDIRECT_URI')
-DEFAULT_REDIRECT_URI = (
-    _raw_redirect_uri.strip() if _raw_redirect_uri 
-    else ('http://localhost:8000/hr/lark/callback' if not IS_VERCEL else None)
-)
+_base_url = os.getenv('LARK_BASE_URL', '').strip()
+if _raw_redirect_uri:
+    DEFAULT_REDIRECT_URI = _raw_redirect_uri.strip()
+elif _base_url:
+    DEFAULT_REDIRECT_URI = f"{_base_url.rstrip('/')}/hr/lark/callback"
+else:
+    DEFAULT_REDIRECT_URI = 'http://localhost:8000/hr/lark/callback' if not IS_VERCEL else None
 
 # Scopes to request (offline_access for refresh tokens)
 LARK_SCOPES = os.getenv('LARK_SCOPES', '')
